@@ -1,3 +1,60 @@
+// const express = require("express");
+
+// const {
+//   upsertAvailability,
+//   getMyHallCalendar,
+//   deleteAvailability,
+//   getPublicHallCalendar,
+// } = require("../controllers/availabilityController");
+
+// const {
+//   protect,
+//   authorize,
+// } = require("../middleware/authMiddleware");
+
+// const router = express.Router();
+
+// /*
+// |--------------------------------------------------------------------------
+// | Public
+// |--------------------------------------------------------------------------
+// */
+
+// router.get(
+//   "/public/hall/:hallId",
+//   getPublicHallCalendar
+// );
+
+// /*
+// |--------------------------------------------------------------------------
+// | Hall Owner
+// |--------------------------------------------------------------------------
+// */
+
+// router.get(
+//   "/my/hall/:hallId",
+//   protect,
+//   authorize("hallOwner"),
+//   getMyHallCalendar
+// );
+
+// router.put(
+//   "/",
+//   protect,
+//   authorize("hallOwner"),
+//   upsertAvailability
+// );
+
+// router.delete(
+//   "/:id",
+//   protect,
+//   authorize("hallOwner"),
+//   deleteAvailability
+// );
+
+// module.exports = router;
+
+
 const express = require("express");
 
 const {
@@ -16,7 +73,7 @@ const router = express.Router();
 
 /*
 |--------------------------------------------------------------------------
-| Public
+| Public Calendar
 |--------------------------------------------------------------------------
 */
 
@@ -27,7 +84,7 @@ router.get(
 
 /*
 |--------------------------------------------------------------------------
-| Hall Owner
+| Hall Owner Calendar
 |--------------------------------------------------------------------------
 */
 
@@ -38,12 +95,24 @@ router.get(
   getMyHallCalendar
 );
 
+/*
+|--------------------------------------------------------------------------
+| Create / Update Manual Availability
+|--------------------------------------------------------------------------
+*/
+
 router.put(
   "/",
   protect,
   authorize("hallOwner"),
   upsertAvailability
 );
+
+/*
+|--------------------------------------------------------------------------
+| Delete Manual Availability
+|--------------------------------------------------------------------------
+*/
 
 router.delete(
   "/:id",
