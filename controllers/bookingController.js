@@ -1,5 +1,4 @@
 // const mongoose = require("mongoose");
-
 // const Booking = require("../models/Booking");
 // const Hall = require("../models/Hall");
 // const Package = require("../models/Package");
@@ -38,6 +37,30 @@
 //   today.setUTCHours(0, 0, 0, 0);
 
 //   return date < today;
+// };
+
+// const formatDate = (date) => {
+//   return new Date(date)
+//     .toISOString()
+//     .slice(0, 10);
+// };
+
+// const populateBooking = async (bookingId) => {
+//   return Booking.findById(bookingId)
+//     .populate({
+//       path: "hall",
+//       select:
+//         "name description city area address phone coverImage images capacity startingPrice currency owner",
+//     })
+//     .populate({
+//       path: "package",
+//       select:
+//         "name description price minGuests maxGuests durationHours features image",
+//     })
+//     .populate({
+//       path: "customer",
+//       select: "name email phone",
+//     });
 // };
 
 // /*
@@ -290,7 +313,10 @@
 //         customerPhone: customer.phone,
 //         customerEmail: customer.email,
 
-//         notes: notes || null,
+//         notes:
+//           typeof notes === "string"
+//             ? notes.trim() || null
+//             : null,
 
 //         status: "pending",
 //         paymentStatus: "unpaid",
@@ -298,21 +324,7 @@
 //       });
 
 //       const populatedBooking =
-//         await Booking.findById(booking._id)
-//           .populate({
-//             path: "hall",
-//             select:
-//               "name city area address phone coverImage startingPrice currency owner",
-//           })
-//           .populate({
-//             path: "package",
-//             select:
-//               "name description price minGuests maxGuests durationHours features image",
-//           })
-//           .populate({
-//             path: "customer",
-//             select: "name email phone",
-//           });
+//         await populateBooking(booking._id);
 
 //       /*
 //       |--------------------------------------------------------------------------
@@ -324,9 +336,9 @@
 //         recipient: hall.owner,
 //         type: "booking_created",
 //         title: "New Booking Request 📅",
-//         message: `You have a new booking request for ${hall.name} on ${normalizedDate
-//           .toISOString()
-//           .slice(0, 10)}.`,
+//         message: `You have a new booking request for ${hall.name} on ${formatDate(
+//           normalizedDate
+//         )}.`,
 //         booking: booking._id,
 //         hall: hall._id,
 //       });
@@ -359,10 +371,7 @@
 //       throw error;
 //     }
 //   } catch (error) {
-//     console.error(
-//       "Create Booking Error:",
-//       error
-//     );
+//     console.error("Create Booking Error:", error);
 
 //     if (error.name === "ValidationError") {
 //       return res.status(400).json({
@@ -503,21 +512,7 @@
 //     }
 
 //     const booking =
-//       await Booking.findById(id)
-//         .populate({
-//           path: "hall",
-//           select:
-//             "name description city area address phone coverImage images capacity startingPrice currency owner",
-//         })
-//         .populate({
-//           path: "package",
-//           select:
-//             "name description price minGuests maxGuests durationHours features image",
-//         })
-//         .populate({
-//           path: "customer",
-//           select: "name email phone",
-//         });
+//       await populateBooking(id);
 
 //     if (!booking) {
 //       return res.status(404).json({
@@ -536,11 +531,13 @@
 //       req.user.role === "admin";
 
 //     const isCustomer =
+//       booking.customer &&
 //       String(booking.customer._id) ===
-//       String(req.user._id);
+//         String(req.user._id);
 
 //     const isHallOwner =
 //       req.user.role === "hallOwner" &&
+//       booking.hall &&
 //       String(booking.hall.owner) ===
 //         String(req.user._id);
 
@@ -558,11 +555,15 @@
 
 //     /*
 //     |--------------------------------------------------------------------------
-//     | Hide owner from customer response
+//     | Hide Owner From Customer Response
 //     |--------------------------------------------------------------------------
 //     */
 
-//     if (!isAdmin && !isHallOwner) {
+//     if (
+//       !isAdmin &&
+//       !isHallOwner &&
+//       booking.hall
+//     ) {
 //       booking.hall.owner = undefined;
 //     }
 
@@ -594,7 +595,14 @@
 // const cancelBooking = async (req, res) => {
 //   try {
 //     const { id } = req.params;
-//     const { reason } = req.body;
+
+//     const rawReason = req.body?.reason;
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Validate Booking ID
+//     |--------------------------------------------------------------------------
+//     */
 
 //     if (!isValidObjectId(id)) {
 //       return res.status(400).json({
@@ -603,12 +611,45 @@
 //       });
 //     }
 
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Validate Reason
+//     |--------------------------------------------------------------------------
+//     */
+
+//     let reason = null;
+
+//     if (rawReason !== undefined && rawReason !== null) {
+//       if (typeof rawReason !== "string") {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Cancellation reason must be text",
+//         });
+//       }
+
+//       reason = rawReason.trim();
+
+//       if (reason.length > 500) {
+//         return res.status(400).json({
+//           success: false,
+//           message:
+//             "Cancellation reason cannot exceed 500 characters",
+//         });
+//       }
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Get Booking
+//     |--------------------------------------------------------------------------
+//     */
+
 //     const booking =
 //       await Booking.findById(id)
 //         .populate({
 //           path: "hall",
 //           select:
-//             "owner name city area",
+//             "owner name city area address",
 //         })
 //         .populate({
 //           path: "customer",
@@ -625,13 +666,14 @@
 
 //     /*
 //     |--------------------------------------------------------------------------
-//     | Only customer or admin can cancel
+//     | Access Control
 //     |--------------------------------------------------------------------------
 //     */
 
 //     const isCustomer =
+//       booking.customer &&
 //       String(booking.customer._id) ===
-//       String(req.user._id);
+//         String(req.user._id);
 
 //     const isAdmin =
 //       req.user.role === "admin";
@@ -644,6 +686,12 @@
 //       });
 //     }
 
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Status Rules
+//     |--------------------------------------------------------------------------
+//     */
+
 //     if (
 //       !["pending", "confirmed"].includes(
 //         booking.status
@@ -652,19 +700,62 @@
 //       return res.status(400).json({
 //         success: false,
 //         message:
-//           "This booking cannot be cancelled",
+//           "Only pending or confirmed bookings can be cancelled",
 //       });
 //     }
 
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Prevent Cancellation After Event Date
+//     |--------------------------------------------------------------------------
+//     */
+
+//     const eventDate = normalizeDate(
+//       booking.eventDate
+//     );
+
+//     if (!eventDate) {
+//       return res.status(400).json({
+//         success: false,
+//         message:
+//           "Booking has an invalid event date",
+//       });
+//     }
+
+//     if (isPastDate(eventDate)) {
+//       return res.status(400).json({
+//         success: false,
+//         message:
+//           "A booking cannot be cancelled after its event date",
+//       });
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Update Booking
+//     |--------------------------------------------------------------------------
+//     */
+
 //     booking.status = "cancelled";
 //     booking.cancelledAt = new Date();
-//     booking.cancellationReason =
-//       reason ||
-//       "Cancelled by customer";
+
+//     if (reason) {
+//       booking.cancellationReason = reason;
+//     } else if (isAdmin) {
+//       booking.cancellationReason =
+//         "Cancelled by administrator";
+//     } else {
+//       booking.cancellationReason =
+//         "Cancelled by customer";
+//     }
 
 //     /*
 //     |--------------------------------------------------------------------------
 //     | Payment Handling
+//     |--------------------------------------------------------------------------
+//     | This only updates the booking payment state.
+//     | Actual refund processing will be handled by the
+//     | payment gateway when online payments are integrated.
 //     |--------------------------------------------------------------------------
 //     */
 
@@ -684,16 +775,18 @@
 //       recipient: booking.hall.owner,
 //       type: "booking_cancelled",
 //       title: "Booking Cancelled",
-//       message: `The booking at ${booking.hall.name} on ${booking.eventDate
-//         .toISOString()
-//         .slice(0, 10)} has been cancelled.`,
+//       message: `The booking at ${
+//         booking.hall.name
+//       } on ${formatDate(
+//         booking.eventDate
+//       )} has been cancelled.`,
 //       booking: booking._id,
 //       hall: booking.hall._id,
 //     });
 
 //     /*
 //     |--------------------------------------------------------------------------
-//     | If Admin Cancelled
+//     | Notify Customer If Admin Cancelled
 //     |--------------------------------------------------------------------------
 //     */
 
@@ -702,18 +795,31 @@
 //         recipient: booking.customer._id,
 //         type: "booking_cancelled",
 //         title: "Booking Cancelled",
-//         message: `Your booking at ${booking.hall.name} on ${booking.eventDate
-//           .toISOString()
-//           .slice(0, 10)} has been cancelled.`,
+//         message: `Your booking at ${
+//           booking.hall.name
+//         } on ${formatDate(
+//           booking.eventDate
+//         )} has been cancelled.`,
 //         booking: booking._id,
 //         hall: booking.hall._id,
 //       });
 //     }
 
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Return Updated Booking
+//     |--------------------------------------------------------------------------
+//     */
+
+//     const updatedBooking =
+//       await populateBooking(
+//         booking._id
+//       );
+
 //     return res.status(200).json({
 //       success: true,
 //       message: "Booking cancelled successfully",
-//       booking,
+//       booking: updatedBooking,
 //     });
 //   } catch (error) {
 //     console.error(
@@ -943,17 +1049,252 @@
 // |--------------------------------------------------------------------------
 // */
 
-// const updateBookingStatus = async (
-//   req,
-//   res
-// ) => {
+// // const updateBookingStatus = async (
+// //   req,
+// //   res
+// // ) => {
+// //   try {
+// //     const { id } = req.params;
+
+// //     const {
+// //       status,
+// //       rejectionReason,
+// //     } = req.body;
+
+// //     if (!isValidObjectId(id)) {
+// //       return res.status(400).json({
+// //         success: false,
+// //         message: "Invalid booking ID",
+// //       });
+// //     }
+
+// //     const allowedStatuses = [
+// //       "confirmed",
+// //       "rejected",
+// //       "completed",
+// //     ];
+
+// //     if (
+// //       !allowedStatuses.includes(
+// //         status
+// //       )
+// //     ) {
+// //       return res.status(400).json({
+// //         success: false,
+// //         message:
+// //           "Invalid status. Allowed: confirmed, rejected, completed",
+// //       });
+// //     }
+
+// //     const booking =
+// //       await Booking.findById(id)
+// //         .populate({
+// //           path: "hall",
+// //           select:
+// //             "owner name isAvailable isDeleted",
+// //         })
+// //         .populate({
+// //           path: "customer",
+// //           select:
+// //             "name email phone",
+// //         });
+
+// //     if (!booking) {
+// //       return res.status(404).json({
+// //         success: false,
+// //         message: "Booking not found",
+// //       });
+// //     }
+
+// //     /*
+// //     |--------------------------------------------------------------------------
+// //     | Access Control
+// //     |--------------------------------------------------------------------------
+// //     */
+
+// //     const isAdmin =
+// //       req.user.role === "admin";
+
+// //     const isOwner =
+// //       req.user.role === "hallOwner" &&
+// //       String(booking.hall.owner) ===
+// //         String(req.user._id);
+
+// //     if (!isAdmin && !isOwner) {
+// //       return res.status(403).json({
+// //         success: false,
+// //         message:
+// //           "You do not have permission to update this booking",
+// //       });
+// //     }
+
+// //     /*
+// //     |--------------------------------------------------------------------------
+// //     | Status Transition Rules
+// //     |--------------------------------------------------------------------------
+// //     */
+
+// //     if (
+// //       status === "confirmed" &&
+// //       booking.status !== "pending"
+// //     ) {
+// //       return res.status(400).json({
+// //         success: false,
+// //         message:
+// //           "Only pending bookings can be confirmed",
+// //       });
+// //     }
+
+// //     if (
+// //       status === "rejected" &&
+// //       booking.status !== "pending"
+// //     ) {
+// //       return res.status(400).json({
+// //         success: false,
+// //         message:
+// //           "Only pending bookings can be rejected",
+// //       });
+// //     }
+
+// //     if (
+// //       status === "completed" &&
+// //       booking.status !== "confirmed"
+// //     ) {
+// //       return res.status(400).json({
+// //         success: false,
+// //         message:
+// //           "Only confirmed bookings can be completed",
+// //       });
+// //     }
+
+// //     /*
+// //     |--------------------------------------------------------------------------
+// //     | Confirm
+// //     |--------------------------------------------------------------------------
+// //     */
+
+// //     if (status === "confirmed") {
+// //       booking.status = "confirmed";
+// //       booking.confirmedAt = new Date();
+// //     }
+
+// //     /*
+// //     |--------------------------------------------------------------------------
+// //     | Reject
+// //     |--------------------------------------------------------------------------
+// //     */
+
+// //     if (status === "rejected") {
+// //       booking.status = "rejected";
+
+// //       booking.cancellationReason =
+// //         typeof rejectionReason === "string" &&
+// //         rejectionReason.trim()
+// //           ? rejectionReason.trim()
+// //           : "Booking rejected by hall management";
+// //     }
+
+// //     /*
+// //     |--------------------------------------------------------------------------
+// //     | Complete
+// //     |--------------------------------------------------------------------------
+// //     */
+
+// //     if (status === "completed") {
+// //       booking.status = "completed";
+// //       booking.completedAt = new Date();
+// //     }
+
+// //     await booking.save();
+
+// //     /*
+// //     |--------------------------------------------------------------------------
+// //     | Customer Notifications
+// //     |--------------------------------------------------------------------------
+// //     */
+
+// //     if (status === "confirmed") {
+// //       await createNotification({
+// //         recipient: booking.customer._id,
+// //         type: "booking_confirmed",
+// //         title: "Booking Confirmed 🎉",
+// //         message: `Your booking at ${
+// //           booking.hall.name
+// //         } on ${formatDate(
+// //           booking.eventDate
+// //         )} has been confirmed.`,
+// //         booking: booking._id,
+// //         hall: booking.hall._id,
+// //       });
+// //     }
+
+// //     if (status === "rejected") {
+// //       await createNotification({
+// //         recipient: booking.customer._id,
+// //         type: "booking_rejected",
+// //         title: "Booking Rejected",
+// //         message: `Your booking at ${
+// //           booking.hall.name
+// //         } on ${formatDate(
+// //           booking.eventDate
+// //         )} was rejected. Reason: ${
+// //           booking.cancellationReason
+// //         }`,
+// //         booking: booking._id,
+// //         hall: booking.hall._id,
+// //       });
+// //     }
+
+// //     if (status === "completed") {
+// //       await createNotification({
+// //         recipient: booking.customer._id,
+// //         type: "booking_completed",
+// //         title: "Booking Completed",
+// //         message: `Your booking at ${booking.hall.name} has been completed. We hope you had a wonderful experience!`,
+// //         booking: booking._id,
+// //         hall: booking.hall._id,
+// //       });
+// //     }
+
+// //     return res.status(200).json({
+// //       success: true,
+// //       message:
+// //         `Booking ${status} successfully`,
+// //       booking,
+// //     });
+// //   } catch (error) {
+// //     console.error(
+// //       "Update Booking Status Error:",
+// //       error
+// //     );
+
+// //     if (error.code === 11000) {
+// //       return res.status(409).json({
+// //         success: false,
+// //         message:
+// //           "Another active booking already exists for this hall and date",
+// //       });
+// //     }
+
+// //     return res.status(500).json({
+// //       success: false,
+// //       message: "Server error",
+// //     });
+// //   }
+// // };
+
+
+// const updateBookingStatus = async (req, res) => {
 //   try {
 //     const { id } = req.params;
 
-//     const {
-//       status,
-//       rejectionReason,
-//     } = req.body;
+//     const { status, rejectionReason } = req.body;
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Validate Booking ID
+//     |--------------------------------------------------------------------------
+//     */
 
 //     if (!isValidObjectId(id)) {
 //       return res.status(400).json({
@@ -962,36 +1303,33 @@
 //       });
 //     }
 
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Validate Status
+//     |--------------------------------------------------------------------------
+//     */
+
 //     const allowedStatuses = [
 //       "confirmed",
 //       "rejected",
 //       "completed",
 //     ];
 
-//     if (
-//       !allowedStatuses.includes(
-//         status
-//       )
-//     ) {
+//     if (!allowedStatuses.includes(status)) {
 //       return res.status(400).json({
 //         success: false,
 //         message:
-//           "Invalid status. Allowed: confirmed, rejected, completed",
+//           "Status must be confirmed, rejected, or completed",
 //       });
 //     }
 
-//     const booking =
-//       await Booking.findById(id)
-//         .populate({
-//           path: "hall",
-//           select:
-//             "owner name isAvailable isDeleted",
-//         })
-//         .populate({
-//           path: "customer",
-//           select:
-//             "name email phone",
-//         });
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Find Booking
+//     |--------------------------------------------------------------------------
+//     */
+
+//     const booking = await Booking.findById(id);
 
 //     if (!booking) {
 //       return res.status(404).json({
@@ -1011,20 +1349,57 @@
 
 //     const isOwner =
 //       req.user.role === "hallOwner" &&
-//       String(booking.hall.owner) ===
-//         String(req.user._id);
+//       booking.hall;
 
 //     if (!isAdmin && !isOwner) {
 //       return res.status(403).json({
 //         success: false,
 //         message:
-//           "You do not have permission to update this booking",
+//           "You are not allowed to update this booking",
 //       });
 //     }
 
 //     /*
 //     |--------------------------------------------------------------------------
-//     | Status Transition Rules
+//     | Verify Hall Ownership
+//     |--------------------------------------------------------------------------
+//     */
+
+//     if (req.user.role === "hallOwner") {
+//       const hall = await Hall.findById(
+//         booking.hall
+//       ).select("owner isDeleted");
+
+//       if (!hall) {
+//         return res.status(404).json({
+//           success: false,
+//           message: "Hall not found",
+//         });
+//       }
+
+//       if (hall.isDeleted) {
+//         return res.status(400).json({
+//           success: false,
+//           message:
+//             "Cannot update a booking for a deleted hall",
+//         });
+//       }
+
+//       if (
+//         String(hall.owner) !==
+//         String(req.user._id)
+//       ) {
+//         return res.status(403).json({
+//           success: false,
+//           message:
+//             "You are not the owner of this hall",
+//         });
+//       }
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Status Transitions
 //     |--------------------------------------------------------------------------
 //     */
 
@@ -1063,120 +1438,513 @@
 
 //     /*
 //     |--------------------------------------------------------------------------
-//     | Confirm
-//     |--------------------------------------------------------------------------
-//     */
-
-//     if (status === "confirmed") {
-//       booking.status = "confirmed";
-//       booking.confirmedAt =
-//         new Date();
-//     }
-
-//     /*
-//     |--------------------------------------------------------------------------
-//     | Reject
+//     | Rejection Reason
 //     |--------------------------------------------------------------------------
 //     */
 
 //     if (status === "rejected") {
-//       booking.status = "rejected";
+//       const reason =
+//         typeof rejectionReason === "string"
+//           ? rejectionReason.trim()
+//           : "";
 
 //       booking.cancellationReason =
-//         rejectionReason ||
-//         "Booking rejected by hall management";
+//         reason ||
+//         "Booking rejected by hall owner";
 //     }
 
 //     /*
 //     |--------------------------------------------------------------------------
-//     | Complete
+//     | Update Status
 //     |--------------------------------------------------------------------------
 //     */
 
-//     if (status === "completed") {
-//       booking.status = "completed";
-//       booking.completedAt =
-//         new Date();
+//     booking.status = status;
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Confirmed
+//     |--------------------------------------------------------------------------
+//     */
+
+//     if (status === "confirmed") {
+//       booking.confirmedAt = new Date();
 //     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Completed
+//     |--------------------------------------------------------------------------
+//     |
+//     | Payment handling:
+//     |
+//     | 1. Cash:
+//     |    Completing the booking means the
+//     |    payment has been received.
+//     |
+//     | 2. Card / Online:
+//     |    Don't blindly change the payment
+//     |    status. Keep the real payment state.
+//     |
+//     */
+
+//     if (status === "completed") {
+//       booking.completedAt = new Date();
+
+//       if (
+//         booking.paymentMethod === "cash" &&
+//         booking.paymentStatus !== "refunded"
+//       ) {
+//         booking.paymentStatus = "paid";
+//       }
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Rejected Payment Handling
+//     |--------------------------------------------------------------------------
+//     */
+
+//     if (status === "rejected") {
+//       if (
+//         booking.paymentStatus !== "paid" &&
+//         booking.paymentStatus !== "refunded"
+//       ) {
+//         booking.paymentStatus = "unpaid";
+//       }
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Save
+//     |--------------------------------------------------------------------------
+//     */
 
 //     await booking.save();
 
 //     /*
 //     |--------------------------------------------------------------------------
-//     | Customer Notifications
+//     | Populate Updated Booking
 //     |--------------------------------------------------------------------------
 //     */
 
+//     const updatedBooking =
+//       await Booking.findById(booking._id)
+//         .populate({
+//           path: "hall",
+//           select:
+//             "name city area address phone coverImage startingPrice currency owner",
+//         })
+//         .populate({
+//           path: "package",
+//           select:
+//             "name description price minGuests maxGuests durationHours features image",
+//         })
+//         .populate({
+//           path: "customer",
+//           select:
+//             "name email phone",
+//         });
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Notify Customer
+//     |--------------------------------------------------------------------------
+//     */
+
+//     let notificationTitle = "";
+//     let notificationMessage = "";
+
 //     if (status === "confirmed") {
-//       await createNotification({
-//         recipient:
-//           booking.customer._id,
-//         type: "booking_confirmed",
-//         title:
-//           "Booking Confirmed 🎉",
-//         message: `Your booking at ${booking.hall.name} on ${booking.eventDate
-//           .toISOString()
-//           .slice(
-//             0,
-//             10
-//           )} has been confirmed.`,
-//         booking: booking._id,
-//         hall: booking.hall._id,
-//       });
+//       notificationTitle =
+//         "Booking Confirmed";
+
+//       notificationMessage =
+//         `Your booking at ${
+//           updatedBooking.hall?.name ||
+//           "the hall"
+//         } has been confirmed.`;
 //     }
 
 //     if (status === "rejected") {
-//       await createNotification({
-//         recipient:
-//           booking.customer._id,
-//         type: "booking_rejected",
-//         title:
-//           "Booking Rejected",
-//         message: `Your booking at ${booking.hall.name} on ${booking.eventDate
-//           .toISOString()
-//           .slice(
-//             0,
-//             10
-//           )} was rejected. Reason: ${
-//           booking.cancellationReason
-//         }`,
-//         booking: booking._id,
-//         hall: booking.hall._id,
-//       });
+//       notificationTitle =
+//         "Booking Rejected";
+
+//       notificationMessage =
+//         `Your booking at ${
+//           updatedBooking.hall?.name ||
+//           "the hall"
+//         } has been rejected.`;
 //     }
 
 //     if (status === "completed") {
-//       await createNotification({
-//         recipient:
-//           booking.customer._id,
-//         type: "booking_completed",
-//         title:
-//           "Booking Completed",
-//         message: `Your booking at ${booking.hall.name} has been completed. We hope you had a wonderful experience!`,
-//         booking: booking._id,
-//         hall: booking.hall._id,
-//       });
+//       notificationTitle =
+//         "Booking Completed";
+
+//       notificationMessage =
+//         `Your booking at ${
+//           updatedBooking.hall?.name ||
+//           "the hall"
+//         } has been completed.`;
 //     }
+
+//     if (notificationTitle) {
+//       try {
+//         await createNotification({
+//           userId: updatedBooking.customer?._id,
+//           title: notificationTitle,
+//           message: notificationMessage,
+//           type: "booking",
+//           relatedId: updatedBooking._id,
+//         });
+//       } catch (notificationError) {
+//         console.error(
+//           "Booking notification error:",
+//           notificationError
+//         );
+//       }
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Response
+//     |--------------------------------------------------------------------------
+//     */
 
 //     return res.status(200).json({
 //       success: true,
 //       message:
 //         `Booking ${status} successfully`,
-//       booking,
+//       booking: updatedBooking,
 //     });
 //   } catch (error) {
 //     console.error(
-//       "Update Booking Status Error:",
+//       "Update booking status error:",
 //       error
 //     );
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Duplicate Key
+//     |--------------------------------------------------------------------------
+//     */
 
 //     if (error.code === 11000) {
 //       return res.status(409).json({
 //         success: false,
 //         message:
-//           "Another active booking already exists for this hall and date",
+//           "This booking conflicts with another booking",
 //       });
 //     }
+
+//     return res.status(500).json({
+//       success: false,
+//       message:
+//         "Failed to update booking status",
+//       error:
+//         process.env.NODE_ENV === "development"
+//           ? error.message
+//           : undefined,
+//     });
+//   }
+// };
+
+
+// /*
+// |--------------------------------------------------------------------------
+// | Get All Bookings - Admin
+// |--------------------------------------------------------------------------
+// | GET /api/v1/bookings/admin
+// |--------------------------------------------------------------------------
+// */
+
+// const getAdminBookings = async (req, res) => {
+//   try {
+//     const {
+//       search,
+//       status,
+//       paymentStatus,
+//       hallId,
+//       from,
+//       to,
+//       page = 1,
+//       limit = 20,
+//     } = req.query;
+
+//     const parsedPage = Math.max(
+//       parseInt(page, 10) || 1,
+//       1
+//     );
+
+//     const parsedLimit = Math.min(
+//       Math.max(
+//         parseInt(limit, 10) || 20,
+//         1
+//       ),
+//       100
+//     );
+
+//     const filter = {};
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Status Filter
+//     |--------------------------------------------------------------------------
+//     */
+
+//     const allowedStatuses = [
+//       "pending",
+//       "confirmed",
+//       "rejected",
+//       "cancelled",
+//       "completed",
+//     ];
+
+//     if (status) {
+//       if (!allowedStatuses.includes(status)) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Invalid booking status",
+//         });
+//       }
+
+//       filter.status = status;
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Payment Status Filter
+//     |--------------------------------------------------------------------------
+//     */
+
+//     const allowedPaymentStatuses = [
+//       "unpaid",
+//       "pending",
+//       "paid",
+//       "failed",
+//       "refunded",
+//     ];
+
+//     if (paymentStatus) {
+//       if (
+//         !allowedPaymentStatuses.includes(
+//           paymentStatus
+//         )
+//       ) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Invalid payment status",
+//         });
+//       }
+
+//       filter.paymentStatus = paymentStatus;
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Hall Filter
+//     |--------------------------------------------------------------------------
+//     */
+
+//     if (hallId) {
+//       if (!isValidObjectId(hallId)) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Invalid hallId",
+//         });
+//       }
+
+//       filter.hall = hallId;
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Date Filter
+//     |--------------------------------------------------------------------------
+//     */
+
+//     if (from || to) {
+//       filter.eventDate = {};
+
+//       if (from) {
+//         const fromDate = normalizeDate(from);
+
+//         if (!fromDate) {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Invalid from date",
+//           });
+//         }
+
+//         filter.eventDate.$gte = fromDate;
+//       }
+
+//       if (to) {
+//         const toDate = normalizeDate(to);
+
+//         if (!toDate) {
+//           return res.status(400).json({
+//             success: false,
+//             message: "Invalid to date",
+//           });
+//         }
+
+//         filter.eventDate.$lte = toDate;
+//       }
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Search
+//     |--------------------------------------------------------------------------
+//     | Search customer name / email / phone.
+//     |--------------------------------------------------------------------------
+//     */
+
+//     if (
+//       typeof search === "string" &&
+//       search.trim()
+//     ) {
+//       const searchTerm = search.trim();
+
+//       filter.$or = [
+//         {
+//           customerName: {
+//             $regex: searchTerm,
+//             $options: "i",
+//           },
+//         },
+//         {
+//           customerEmail: {
+//             $regex: searchTerm,
+//             $options: "i",
+//           },
+//         },
+//         {
+//           customerPhone: {
+//             $regex: searchTerm,
+//             $options: "i",
+//           },
+//         },
+//       ];
+//     }
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Count
+//     |--------------------------------------------------------------------------
+//     */
+
+//     const total =
+//       await Booking.countDocuments(filter);
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Bookings
+//     |--------------------------------------------------------------------------
+//     */
+
+//     const bookings =
+//       await Booking.find(filter)
+//         .populate({
+//           path: "hall",
+//           select:
+//             "name city area address phone coverImage startingPrice currency owner status isAvailable",
+//           populate: {
+//             path: "owner",
+//             select: "name email phone",
+//           },
+//         })
+//         .populate({
+//           path: "package",
+//           select:
+//             "name description price minGuests maxGuests durationHours features image",
+//         })
+//         .populate({
+//           path: "customer",
+//           select: "name email phone",
+//         })
+//         .sort({
+//           eventDate: 1,
+//           createdAt: -1,
+//         })
+//         .skip(
+//           (parsedPage - 1) * parsedLimit
+//         )
+//         .limit(parsedLimit)
+//         .lean();
+
+//     /*
+//     |--------------------------------------------------------------------------
+//     | Stats
+//     |--------------------------------------------------------------------------
+//     */
+
+//     const [
+//       pendingCount,
+//       confirmedCount,
+//       completedCount,
+//       cancelledCount,
+//       rejectedCount,
+//       paidCount,
+//     ] = await Promise.all([
+//       Booking.countDocuments({
+//         ...filter,
+//         status: "pending",
+//       }),
+
+//       Booking.countDocuments({
+//         ...filter,
+//         status: "confirmed",
+//       }),
+
+//       Booking.countDocuments({
+//         ...filter,
+//         status: "completed",
+//       }),
+
+//       Booking.countDocuments({
+//         ...filter,
+//         status: "cancelled",
+//       }),
+
+//       Booking.countDocuments({
+//         ...filter,
+//         status: "rejected",
+//       }),
+
+//       Booking.countDocuments({
+//         ...filter,
+//         paymentStatus: "paid",
+//       }),
+//     ]);
+
+//     return res.status(200).json({
+//       success: true,
+//       bookings,
+//       stats: {
+//         total,
+//         pending: pendingCount,
+//         confirmed: confirmedCount,
+//         completed: completedCount,
+//         cancelled: cancelledCount,
+//         rejected: rejectedCount,
+//         paid: paidCount,
+//       },
+//       pagination: {
+//         page: parsedPage,
+//         limit: parsedLimit,
+//         total,
+//         pages: Math.ceil(
+//           total / parsedLimit
+//         ),
+//       },
+//     });
+//   } catch (error) {
+//     console.error(
+//       "Get Admin Bookings Error:",
+//       error
+//     );
 
 //     return res.status(500).json({
 //       success: false,
@@ -1192,7 +1960,10 @@
 //   cancelBooking,
 //   getOwnerBookings,
 //   updateBookingStatus,
+//   getAdminBookings,
 // };
+
+
 
 const mongoose = require("mongoose");
 
@@ -1816,7 +2587,10 @@ const cancelBooking = async (req, res) => {
 
     let reason = null;
 
-    if (rawReason !== undefined && rawReason !== null) {
+    if (
+      rawReason !== undefined &&
+      rawReason !== null
+    ) {
       if (typeof rawReason !== "string") {
         return res.status(400).json({
           success: false,
@@ -1949,10 +2723,6 @@ const cancelBooking = async (req, res) => {
     /*
     |--------------------------------------------------------------------------
     | Payment Handling
-    |--------------------------------------------------------------------------
-    | This only updates the booking payment state.
-    | Actual refund processing will be handled by the
-    | payment gateway when online payments are integrated.
     |--------------------------------------------------------------------------
     */
 
@@ -2244,248 +3014,31 @@ const getOwnerBookings = async (req, res) => {
 |--------------------------------------------------------------------------
 | PATCH /api/v1/bookings/:id/status
 |--------------------------------------------------------------------------
+|
+| IMPORTANT:
+| Changing booking status NEVER changes payment status.
+|
+| pending
+|   ↓
+| confirmed + unpaid
+|   ↓
+| mark as paid
+|   ↓
+| confirmed + paid
+|   ↓
+| completed + paid
+|
+|--------------------------------------------------------------------------
 */
-
-// const updateBookingStatus = async (
-//   req,
-//   res
-// ) => {
-//   try {
-//     const { id } = req.params;
-
-//     const {
-//       status,
-//       rejectionReason,
-//     } = req.body;
-
-//     if (!isValidObjectId(id)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Invalid booking ID",
-//       });
-//     }
-
-//     const allowedStatuses = [
-//       "confirmed",
-//       "rejected",
-//       "completed",
-//     ];
-
-//     if (
-//       !allowedStatuses.includes(
-//         status
-//       )
-//     ) {
-//       return res.status(400).json({
-//         success: false,
-//         message:
-//           "Invalid status. Allowed: confirmed, rejected, completed",
-//       });
-//     }
-
-//     const booking =
-//       await Booking.findById(id)
-//         .populate({
-//           path: "hall",
-//           select:
-//             "owner name isAvailable isDeleted",
-//         })
-//         .populate({
-//           path: "customer",
-//           select:
-//             "name email phone",
-//         });
-
-//     if (!booking) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Booking not found",
-//       });
-//     }
-
-//     /*
-//     |--------------------------------------------------------------------------
-//     | Access Control
-//     |--------------------------------------------------------------------------
-//     */
-
-//     const isAdmin =
-//       req.user.role === "admin";
-
-//     const isOwner =
-//       req.user.role === "hallOwner" &&
-//       String(booking.hall.owner) ===
-//         String(req.user._id);
-
-//     if (!isAdmin && !isOwner) {
-//       return res.status(403).json({
-//         success: false,
-//         message:
-//           "You do not have permission to update this booking",
-//       });
-//     }
-
-//     /*
-//     |--------------------------------------------------------------------------
-//     | Status Transition Rules
-//     |--------------------------------------------------------------------------
-//     */
-
-//     if (
-//       status === "confirmed" &&
-//       booking.status !== "pending"
-//     ) {
-//       return res.status(400).json({
-//         success: false,
-//         message:
-//           "Only pending bookings can be confirmed",
-//       });
-//     }
-
-//     if (
-//       status === "rejected" &&
-//       booking.status !== "pending"
-//     ) {
-//       return res.status(400).json({
-//         success: false,
-//         message:
-//           "Only pending bookings can be rejected",
-//       });
-//     }
-
-//     if (
-//       status === "completed" &&
-//       booking.status !== "confirmed"
-//     ) {
-//       return res.status(400).json({
-//         success: false,
-//         message:
-//           "Only confirmed bookings can be completed",
-//       });
-//     }
-
-//     /*
-//     |--------------------------------------------------------------------------
-//     | Confirm
-//     |--------------------------------------------------------------------------
-//     */
-
-//     if (status === "confirmed") {
-//       booking.status = "confirmed";
-//       booking.confirmedAt = new Date();
-//     }
-
-//     /*
-//     |--------------------------------------------------------------------------
-//     | Reject
-//     |--------------------------------------------------------------------------
-//     */
-
-//     if (status === "rejected") {
-//       booking.status = "rejected";
-
-//       booking.cancellationReason =
-//         typeof rejectionReason === "string" &&
-//         rejectionReason.trim()
-//           ? rejectionReason.trim()
-//           : "Booking rejected by hall management";
-//     }
-
-//     /*
-//     |--------------------------------------------------------------------------
-//     | Complete
-//     |--------------------------------------------------------------------------
-//     */
-
-//     if (status === "completed") {
-//       booking.status = "completed";
-//       booking.completedAt = new Date();
-//     }
-
-//     await booking.save();
-
-//     /*
-//     |--------------------------------------------------------------------------
-//     | Customer Notifications
-//     |--------------------------------------------------------------------------
-//     */
-
-//     if (status === "confirmed") {
-//       await createNotification({
-//         recipient: booking.customer._id,
-//         type: "booking_confirmed",
-//         title: "Booking Confirmed 🎉",
-//         message: `Your booking at ${
-//           booking.hall.name
-//         } on ${formatDate(
-//           booking.eventDate
-//         )} has been confirmed.`,
-//         booking: booking._id,
-//         hall: booking.hall._id,
-//       });
-//     }
-
-//     if (status === "rejected") {
-//       await createNotification({
-//         recipient: booking.customer._id,
-//         type: "booking_rejected",
-//         title: "Booking Rejected",
-//         message: `Your booking at ${
-//           booking.hall.name
-//         } on ${formatDate(
-//           booking.eventDate
-//         )} was rejected. Reason: ${
-//           booking.cancellationReason
-//         }`,
-//         booking: booking._id,
-//         hall: booking.hall._id,
-//       });
-//     }
-
-//     if (status === "completed") {
-//       await createNotification({
-//         recipient: booking.customer._id,
-//         type: "booking_completed",
-//         title: "Booking Completed",
-//         message: `Your booking at ${booking.hall.name} has been completed. We hope you had a wonderful experience!`,
-//         booking: booking._id,
-//         hall: booking.hall._id,
-//       });
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       message:
-//         `Booking ${status} successfully`,
-//       booking,
-//     });
-//   } catch (error) {
-//     console.error(
-//       "Update Booking Status Error:",
-//       error
-//     );
-
-//     if (error.code === 11000) {
-//       return res.status(409).json({
-//         success: false,
-//         message:
-//           "Another active booking already exists for this hall and date",
-//       });
-//     }
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Server error",
-//     });
-//   }
-// };
-
 
 const updateBookingStatus = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { status, rejectionReason } = req.body;
+    const {
+      status,
+      rejectionReason,
+    } = req.body;
 
     /*
     |--------------------------------------------------------------------------
@@ -2666,34 +3219,31 @@ const updateBookingStatus = async (req, res) => {
 
     if (status === "confirmed") {
       booking.confirmedAt = new Date();
+
+      /*
+      IMPORTANT:
+      Confirming the booking does NOT mean
+      that the customer has paid.
+      */
     }
 
     /*
     |--------------------------------------------------------------------------
     | Completed
     |--------------------------------------------------------------------------
-    |
-    | Payment handling:
-    |
-    | 1. Cash:
-    |    Completing the booking means the
-    |    payment has been received.
-    |
-    | 2. Card / Online:
-    |    Don't blindly change the payment
-    |    status. Keep the real payment state.
-    |
     */
 
     if (status === "completed") {
       booking.completedAt = new Date();
 
-      if (
-        booking.paymentMethod === "cash" &&
-        booking.paymentStatus !== "refunded"
-      ) {
-        booking.paymentStatus = "paid";
-      }
+      /*
+      IMPORTANT:
+      Completing the booking does NOT automatically
+      mark the booking as paid.
+
+      Payment must be recorded separately through:
+      PATCH /bookings/:id/payment
+      */
     }
 
     /*
@@ -2788,7 +3338,8 @@ const updateBookingStatus = async (req, res) => {
     if (notificationTitle) {
       try {
         await createNotification({
-          userId: updatedBooking.customer?._id,
+          userId:
+            updatedBooking.customer?._id,
           title: notificationTitle,
           message: notificationMessage,
           type: "booking",
@@ -2846,6 +3397,239 @@ const updateBookingStatus = async (req, res) => {
   }
 };
 
+/*
+|--------------------------------------------------------------------------
+| Mark Booking As Paid
+|--------------------------------------------------------------------------
+| PATCH /api/v1/bookings/:id/payment
+|--------------------------------------------------------------------------
+|
+| This is intentionally separate from booking status.
+|
+| Confirmed + Unpaid
+|        ↓
+| Mark as Paid
+|        ↓
+| Confirmed + Paid
+|
+|--------------------------------------------------------------------------
+*/
+
+const markBookingAsPaid = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    /*
+    |--------------------------------------------------------------------------
+    | Validate Booking ID
+    |--------------------------------------------------------------------------
+    */
+
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking ID",
+      });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Find Booking
+    |--------------------------------------------------------------------------
+    */
+
+    const booking =
+      await Booking.findById(id);
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Find Hall
+    |--------------------------------------------------------------------------
+    */
+
+    const hall =
+      await Hall.findById(
+        booking.hall
+      ).select(
+        "owner name isDeleted"
+      );
+
+    if (!hall) {
+      return res.status(404).json({
+        success: false,
+        message: "Hall not found",
+      });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Access Control
+    |--------------------------------------------------------------------------
+    */
+
+    const isAdmin =
+      req.user.role === "admin";
+
+    const isOwner =
+      req.user.role === "hallOwner" &&
+      String(hall.owner) ===
+        String(req.user._id);
+
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You are not allowed to update payment for this booking",
+      });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Deleted Hall
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+      req.user.role === "hallOwner" &&
+      hall.isDeleted
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Cannot update payment for a deleted hall",
+      });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Booking Status Rules
+    |--------------------------------------------------------------------------
+    |
+    | Payment can only be manually recorded after
+    | the booking has been accepted.
+    |
+    */
+
+    if (
+      !["confirmed", "completed"].includes(
+        booking.status
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Only confirmed or completed bookings can be marked as paid",
+      });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Already Paid
+    |--------------------------------------------------------------------------
+    */
+
+    if (booking.paymentStatus === "paid") {
+      return res.status(400).json({
+        success: false,
+        message: "Booking is already marked as paid",
+      });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Refunded Booking
+    |--------------------------------------------------------------------------
+    */
+
+    if (booking.paymentStatus === "refunded") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "A refunded booking cannot be marked as paid",
+      });
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Mark Payment As Paid
+    |--------------------------------------------------------------------------
+    */
+
+    booking.paymentStatus = "paid";
+
+    await booking.save();
+
+    /*
+    |--------------------------------------------------------------------------
+    | Populate Updated Booking
+    |--------------------------------------------------------------------------
+    */
+
+    const updatedBooking =
+      await populateBooking(
+        booking._id
+      );
+
+    /*
+    |--------------------------------------------------------------------------
+    | Notify Customer
+    |--------------------------------------------------------------------------
+    */
+
+    try {
+      await createNotification({
+        userId:
+          updatedBooking.customer?._id,
+        title: "Payment Received",
+        message: `Your payment for the booking at ${
+          updatedBooking.hall?.name ||
+          "the hall"
+        } has been marked as paid.`,
+        type: "booking",
+        relatedId: updatedBooking._id,
+      });
+    } catch (notificationError) {
+      console.error(
+        "Payment notification error:",
+        notificationError
+      );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Response
+    |--------------------------------------------------------------------------
+    */
+
+    return res.status(200).json({
+      success: true,
+      message: "Booking payment marked as paid",
+      booking: updatedBooking,
+    });
+  } catch (error) {
+    console.error(
+      "Mark Booking As Paid Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to update booking payment",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
+    });
+  }
+};
 
 /*
 |--------------------------------------------------------------------------
@@ -2934,7 +3718,8 @@ const getAdminBookings = async (req, res) => {
         });
       }
 
-      filter.paymentStatus = paymentStatus;
+      filter.paymentStatus =
+        paymentStatus;
     }
 
     /*
@@ -2964,7 +3749,8 @@ const getAdminBookings = async (req, res) => {
       filter.eventDate = {};
 
       if (from) {
-        const fromDate = normalizeDate(from);
+        const fromDate =
+          normalizeDate(from);
 
         if (!fromDate) {
           return res.status(400).json({
@@ -2977,7 +3763,8 @@ const getAdminBookings = async (req, res) => {
       }
 
       if (to) {
-        const toDate = normalizeDate(to);
+        const toDate =
+          normalizeDate(to);
 
         if (!toDate) {
           return res.status(400).json({
@@ -2994,15 +3781,14 @@ const getAdminBookings = async (req, res) => {
     |--------------------------------------------------------------------------
     | Search
     |--------------------------------------------------------------------------
-    | Search customer name / email / phone.
-    |--------------------------------------------------------------------------
     */
 
     if (
       typeof search === "string" &&
       search.trim()
     ) {
-      const searchTerm = search.trim();
+      const searchTerm =
+        search.trim();
 
       filter.$or = [
         {
@@ -3033,7 +3819,9 @@ const getAdminBookings = async (req, res) => {
     */
 
     const total =
-      await Booking.countDocuments(filter);
+      await Booking.countDocuments(
+        filter
+      );
 
     /*
     |--------------------------------------------------------------------------
@@ -3049,7 +3837,8 @@ const getAdminBookings = async (req, res) => {
             "name city area address phone coverImage startingPrice currency owner status isAvailable",
           populate: {
             path: "owner",
-            select: "name email phone",
+            select:
+              "name email phone",
           },
         })
         .populate({
@@ -3059,14 +3848,16 @@ const getAdminBookings = async (req, res) => {
         })
         .populate({
           path: "customer",
-          select: "name email phone",
+          select:
+            "name email phone",
         })
         .sort({
           eventDate: 1,
           createdAt: -1,
         })
         .skip(
-          (parsedPage - 1) * parsedLimit
+          (parsedPage - 1) *
+            parsedLimit
         )
         .limit(parsedLimit)
         .lean();
@@ -3157,5 +3948,6 @@ module.exports = {
   cancelBooking,
   getOwnerBookings,
   updateBookingStatus,
+  markBookingAsPaid,
   getAdminBookings,
 };
