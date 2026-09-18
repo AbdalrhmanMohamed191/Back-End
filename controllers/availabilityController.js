@@ -1662,7 +1662,7 @@ const getPublicHallCalendar = async (req, res) => {
       */
 
       status: {
-        $in: ["pending", "confirmed"],
+        $in: ["pending", "confirmed", "completed"],
       },
     };
 
